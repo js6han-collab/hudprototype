@@ -1,0 +1,11 @@
+node_modules/
+dist/
+
+# Vite dev cache
+.vite/
+
+# Local Netlify folder
+.netlify
+
+# Figma MCP screenshot cache — dev-time only
+.figma-cache/

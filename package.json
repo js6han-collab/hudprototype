@@ -1,0 +1,15 @@
+{
+  "name": "hud-prototype",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "HUD prototype — gametest 의 HUD 작업을 분리한 별도 프로젝트",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}
