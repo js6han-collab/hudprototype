@@ -3355,6 +3355,8 @@ body.pad-mode .weapon-attach.fi-pad-focus::before {
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- r128 호환 GLTFLoader (UMD — THREE.GLTFLoader 네임스페이스). Soldier.glb 로딩용. -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 "use strict";
 
@@ -3987,9 +3989,9 @@ function makeItem(defId, opts) {
 // ============= THREE.JS SCENE SETUP ==================
 // =====================================================
 const scene = new THREE.Scene();
-// sky sphere 가 배경 전체를 감싸므로 scene.background 는 horizon 색 fallback.
-scene.background = new THREE.Color(0xa8d0e8);
-scene.fog = new THREE.Fog(0xb8d4e8, 60, 160);
+// 늦은 오후 — 푸른 하늘에 살짝 따뜻한 지평선.
+scene.background = new THREE.Color(0xc4d2dc);
+scene.fog = new THREE.Fog(0xc8d4dc, 80, 240);   // 약간 푸른 안개
 
 // Hemisphere sky — world Y 기준 zenith→horizon 그라데이션. 메시 1개(sphere) + 간단한 shader.
 (function addSkyDome() {
@@ -3999,8 +4001,8 @@ scene.fog = new THREE.Fog(0xb8d4e8, 60, 160);
     depthWrite: false,
     fog: false,
     uniforms: {
-      topColor:    { value: new THREE.Color(0x3d7fb8) },   // 천정 — 진한 하늘
-      bottomColor: { value: new THREE.Color(0xc8dfeb) },   // 지평 — 옅은 푸른 회색
+      topColor:    { value: new THREE.Color(0x4a8bc8) },   // 천정 — 푸른 하늘
+      bottomColor: { value: new THREE.Color(0xd8d0c8) },   // 지평 — 살짝 따뜻한 옅은 톤 (오후 햇빛)
       offset:      { value: 12 },
       exponent:    { value: 0.55 },
     },
@@ -4030,11 +4032,15 @@ scene.fog = new THREE.Fog(0xb8d4e8, 60, 160);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 400);
 const CAMERA_BASE_FOV = 60;   // FOV punch 원복 기준값
-const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('cv'), antialias: false });
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('cv'), antialias: true });
 renderer.setPixelRatio(1);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.BasicShadowMap;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// ACES Filmic + sRGB — 영화적 콘트라스트/색감. r128 컨벤션.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputEncoding = THREE.sRGBEncoding;
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth/window.innerHeight;
@@ -4051,48 +4057,102 @@ function updateFigCanvasScale() {
 }
 updateFigCanvasScale();   // 초기 1회
 
-// Lights
-const hemi = new THREE.HemisphereLight(0x87ceeb, 0x4a7c3f, 0.75);
+// Lights — 늦은 오후 톤. 살짝 따뜻하지만 밝음.
+const hemi = new THREE.HemisphereLight(0x8db8de, 0x6a5f3f, 0.55);   // 하늘 푸르게 + 땅 살짝 따뜻
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff5e0, 1.1);
-sun.position.set(30, 50, 20);
+const sun = new THREE.DirectionalLight(0xfff0d0, 2.4);   // 따뜻한 흰빛 (정오보단 황금 톤)
+sun.position.set(30, 50, 20);                              // 적당히 높은 각도 (오후)
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.mapSize.set(2048, 2048);   // 1024 → 2048, 그림자 가장자리 부드러움 ↑
 sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
 sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
+sun.shadow.camera.near = 0.5;
+sun.shadow.camera.far = 200;
+sun.shadow.bias = -0.0008;   // shadow acne 방지
+sun.shadow.normalBias = 0.02;
 scene.add(sun);
+// 작은 fill light — 그림자 영역에 푸른빛 (sky bounce).
+const fill = new THREE.DirectionalLight(0x88a8d8, 0.25);
+fill.position.set(-20, 30, -10);
+scene.add(fill);
 
-// Ground — 절차적 canvas 텍스처. 512x512 noise + speckle, 한 번만 생성. repeat 으로 반복 적용.
+// Ground — 흙 + 콘크리트 mix 절차적 텍스처. 회색 콘크리트 패치 + 갈색 흙 패치 + 미세 노이즈.
 const groundTex = (function buildGroundTexture() {
   const c = document.createElement('canvas');
-  c.width = c.height = 512;
+  c.width = c.height = 1024;   // 더 큰 해상도 → 디테일 풍부
   const ctx = c.getContext('2d');
-  // 베이스 그라데이션 — 사용자 요청으로 한 단계 밝게.
-  const g = ctx.createLinearGradient(0, 0, 512, 512);
-  g.addColorStop(0, '#85785a'); g.addColorStop(0.5, '#776a4c'); g.addColorStop(1, '#7d7251');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 512, 512);
-  // 작은 speckle — 더 밝은 톤으로 디테일 강조
-  for (let i = 0; i < 6000; i++) {
-    const x = Math.random()*512, y = Math.random()*512;
-    const v = 90 + Math.random()*55;
-    ctx.fillStyle = `rgba(${v},${v*0.93},${v*0.72},0.45)`;
-    ctx.fillRect(x, y, 1+Math.random()*1.5, 1+Math.random()*1.5);
-  }
-  // 큰 blotch — 풀 패치, 밝게
-  for (let i = 0; i < 90; i++) {
-    const x = Math.random()*512, y = Math.random()*512;
-    const r = 8 + Math.random()*24;
-    ctx.fillStyle = `rgba(${80+Math.random()*30},${100+Math.random()*35},${55+Math.random()*25},0.30)`;
+
+  // 1) 베이스 — 어두운 회색-갈색 (콘크리트 톤)
+  ctx.fillStyle = '#3a3530';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  // 2) 큰 콘크리트 패치 (회색, 불규칙)
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random()*1024, y = Math.random()*1024;
+    const r = 60 + Math.random()*140;
+    const v = 50 + Math.random()*25;
+    ctx.fillStyle = `rgba(${v},${v*0.97},${v*0.93},0.55)`;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
   }
+
+  // 3) 갈색 흙 패치 (warm brown, irregular)
+  for (let i = 0; i < 60; i++) {
+    const x = Math.random()*1024, y = Math.random()*1024;
+    const r = 40 + Math.random()*110;
+    ctx.fillStyle = `rgba(${50+Math.random()*25},${38+Math.random()*18},${28+Math.random()*14},0.42)`;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  }
+
+  // 4) 어두운 얼룩 (오일/물자국)
+  for (let i = 0; i < 25; i++) {
+    const x = Math.random()*1024, y = Math.random()*1024;
+    const r = 15 + Math.random()*45;
+    ctx.fillStyle = `rgba(15,12,10,${0.3 + Math.random()*0.25})`;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  }
+
+  // 5) 미세 자갈/모래 speckle (밝은 점)
+  for (let i = 0; i < 12000; i++) {
+    const x = Math.random()*1024, y = Math.random()*1024;
+    const v = 70 + Math.random()*60;
+    const a = 0.18 + Math.random()*0.32;
+    ctx.fillStyle = `rgba(${v},${v*0.95},${v*0.85},${a})`;
+    const s = 0.8 + Math.random()*1.8;
+    ctx.fillRect(x, y, s, s);
+  }
+
+  // 6) 어두운 미세 점 (먼지/구멍)
+  for (let i = 0; i < 5000; i++) {
+    const x = Math.random()*1024, y = Math.random()*1024;
+    ctx.fillStyle = `rgba(15,12,8,${0.2 + Math.random()*0.3})`;
+    ctx.fillRect(x, y, 0.8 + Math.random()*1.2, 0.8 + Math.random()*1.2);
+  }
+
+  // 7) 균열 (concrete cracks) — 얇은 어두운 선
+  ctx.strokeStyle = 'rgba(20,18,15,0.5)';
+  for (let i = 0; i < 18; i++) {
+    ctx.lineWidth = 0.5 + Math.random()*1.2;
+    ctx.beginPath();
+    let x = Math.random()*1024, y = Math.random()*1024;
+    ctx.moveTo(x, y);
+    const segs = 3 + Math.floor(Math.random()*5);
+    for (let j = 0; j < segs; j++) {
+      x += (Math.random()-0.5) * 80;
+      y += (Math.random()-0.5) * 80;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(24, 24);
+  t.repeat.set(16, 16);   // 24 → 16, 타일 큼직하게 → 디테일 더 잘 보임
   t.anisotropy = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;
+  t.encoding = THREE.sRGBEncoding;
   return t;
 })();
-// material color 도 밝게 — tex 와 함께 multiply 되므로 final tone 이 환해짐.
-const groundMat = new THREE.MeshStandardMaterial({ color: 0xb8aa82, map: groundTex, roughness: 1 });
+// material color: 어두운 자갈색 — tex 와 multiply 되므로 텍스처 톤 그대로 살림.
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x8a8278, map: groundTex, roughness: 0.95, metalness: 0.0 });
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), groundMat);
 ground.rotation.x = -Math.PI/2;
 ground.receiveShadow = true;
@@ -4149,11 +4209,23 @@ function animateClouds(dt) {
   }
 }
 
-// Cover pieces (reused from original)
-const coverMat = new THREE.MeshStandardMaterial({ color: 0x6a5d3e, roughness: 0.9 });
+// Cover pieces — 각 박스마다 머티리얼 살짝 변주 (색상 / roughness) → 똑같이 안 보이게.
+const _coverPalette = [
+  { color: 0x6a5d3e, roughness: 0.92 },   // 진한 카키
+  { color: 0x7a6d4a, roughness: 0.88 },   // 더 밝은 카키
+  { color: 0x5d4f33, roughness: 0.95 },   // 어두운 갈색
+  { color: 0x6f6650, roughness: 0.78 },   // 회녹색, 살짝 반광
+  { color: 0x817256, roughness: 0.85 },   // 베이지 갈색
+];
 const coverPieces = [];
 function addCover(x, z, w, h, d) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), coverMat);
+  const variant = _coverPalette[(Math.abs(Math.round(x * 7 + z * 11)) % _coverPalette.length)];
+  const mat = new THREE.MeshStandardMaterial({
+    color: variant.color,
+    roughness: variant.roughness,
+    metalness: 0.05,
+  });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, h/2, z);
   m.castShadow = true;
   m.receiveShadow = true;
@@ -4373,6 +4445,367 @@ const legL = makeLeg('L');
 const legR = makeLeg('R');
 
 const anim = { phase: 0, swing: 0 };
+
+// =====================================================
+// ============= GLTF SOLDIER CHARACTER ================
+// =====================================================
+// three.js r128 Soldier.glb (~2MB, Mixamo 휴머노이드 + Idle/Walking/Running 클립).
+// 비동기 로드: 성공 시 procedural 박스 body 숨기고 GLTF 모델로 대체.
+// 실패 시 기존 박스 캐릭터 그대로 사용 (안전 fallback).
+// rifle/muzzleFlashAnchor 는 torso 자식이지만 visible 유지 — 위치 변경 없음.
+const soldier = {
+  loaded: false,
+  model: null,
+  mixer: null,
+  actions: { idle: null, walk: null, run: null },
+  extras: {},   // 추가 클립 (사격/장전/점프/투척/옆걸음/회전/피격 등) — 키 입력 등으로 trigger 가능
+  current: null,
+};
+(function loadSoldier() {
+  if (typeof THREE.GLTFLoader !== 'function') {
+    console.warn('GLTFLoader 미로드 — procedural 박스 캐릭터 유지');
+    return;
+  }
+  const loader = new THREE.GLTFLoader();
+  // Promise wrapper
+  const loadGLB = (url) => new Promise((res, rej) => loader.load(url, res, undefined, rej));
+
+  // Basic Shooter Pack 의 16개 애니메이션 (Mixamo Ch18, Without Skin). 파일명 → extras 키.
+  const animFiles = {
+    aim:           'rifle_aiming_idle.glb',
+    walk:          'walking.glb',
+    run:           'rifle_run.glb',
+    walkBack:      'walking_backwards.glb',
+    runBack:       'run_backwards.glb',
+    strafe:        'strafe.glb',
+    strafeL:       'strafe_left.glb',
+    strafeR:       'strafe_right.glb',
+    strafe2:       'strafe__2_.glb',
+    fire:          'firing_rifle.glb',
+    reload:        'reloading.glb',
+    jump:          'rifle_jump.glb',
+    toss:          'toss_grenade.glb',
+    hit:           'hit_reaction.glb',
+    turnL:         'turn_left.glb',
+    turnR:         'turning_right_45_degrees.glb',
+  };
+
+  // 본 이름 retargeting — Soldier.glb 의 본과 anim GLB 의 track 이름이 prefix 다를 가능성 대비.
+  // 예: Soldier 가 'mixamorigHips', anim 이 'mixamorig:Hips' → track 의 ':' 제거.
+  function _retargetClip(clip, validBoneNames) {
+    let renamed = 0;
+    for (const track of clip.tracks) {
+      const dotIdx = track.name.lastIndexOf('.');
+      if (dotIdx < 0) continue;
+      const boneName = track.name.substring(0, dotIdx);
+      const prop = track.name.substring(dotIdx);
+      if (validBoneNames.has(boneName)) continue;
+      const stripped = boneName.replace(/:/g, '');
+      if (validBoneNames.has(stripped)) {
+        track.name = stripped + prop;
+        renamed++;
+        continue;
+      }
+      const withColon = boneName.replace(/mixamorig/, 'mixamorig:');
+      if (validBoneNames.has(withColon)) {
+        track.name = withColon + prop;
+        renamed++;
+      }
+    }
+    return renamed;
+  }
+
+  // Hips position track 제거 — 클립에 root translation 이 남아있으면 캐릭터가 제자리에서
+  // 움직이지 않고 끌려가는 듯한 motion 발생. position 만 strip, quaternion 은 rebase 로 유지.
+  function _stripHipsPosition(clip) {
+    const before = clip.tracks.length;
+    clip.tracks = clip.tracks.filter(t => !/Hips\.position$/i.test(t.name));
+    return before - clip.tracks.length;
+  }
+  // Head/Neck quaternion track 제거 — Mixamo 슈터 클립은 aim 방향 따라 머리/목 트위스트
+  // 가 baked in. 정면 시선 강제하려면 이 트랙 제거 → 머리는 bind pose 유지.
+  function _stripHeadTracks(clip) {
+    const before = clip.tracks.length;
+    clip.tracks = clip.tracks.filter(t => !/(Head|Neck)\.quaternion$/i.test(t.name));
+    return before - clip.tracks.length;
+  }
+
+  // Hips quaternion rebase — FBX2glTF 변환으로 Mixamo 클립의 Hips 회전이 Soldier.glb 의 bind pose
+  // 와 어긋남 (예: -90° X 회전 → 누움). 클립의 첫 프레임 Hips 회전을 Soldier 의 bind pose 기준
+  // 상대값으로 재계산해서 첫 프레임이 정확히 bind pose 와 일치, 이후 프레임은 delta 만 적용.
+  // 결과: 캐릭터가 누워있지 않고 + 걸을 때 미세한 hip sway 회전도 정상.
+  function _rebaseHipsQuaternion(clip, hipsBindQuat) {
+    let rebasedTracks = 0;
+    for (const track of clip.tracks) {
+      if (!/Hips\.quaternion$/i.test(track.name)) continue;
+      if (!track.values || track.values.length < 4) continue;
+      const numFrames = track.values.length / 4;
+      // First frame quat inverse — local-frame delta 계산
+      const q0Inv = new THREE.Quaternion(
+        track.values[0], track.values[1], track.values[2], track.values[3]
+      ).invert();
+      const tmpQ = new THREE.Quaternion();
+      const tmpDelta = new THREE.Quaternion();
+      for (let i = 0; i < numFrames; i++) {
+        const idx = i * 4;
+        tmpQ.set(track.values[idx], track.values[idx+1], track.values[idx+2], track.values[idx+3]);
+        // local-frame delta = q0Inv * q_i — 더 jitter 적음
+        tmpDelta.copy(q0Inv).multiply(tmpQ);
+        // result = bindQuat * delta
+        tmpQ.copy(hipsBindQuat).multiply(tmpDelta);
+        track.values[idx]   = tmpQ.x;
+        track.values[idx+1] = tmpQ.y;
+        track.values[idx+2] = tmpQ.z;
+        track.values[idx+3] = tmpQ.w;
+      }
+      rebasedTracks++;
+    }
+    return rebasedTracks;
+  }
+
+  (async () => {
+    try {
+      // 1) Soldier mesh + 기본 clips 로드
+      const soldierGltf = await loadGLB('figma-assets/models/Soldier.glb');
+      const model = soldierGltf.scene;
+      model.traverse(o => {
+        if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; }
+      });
+      model.scale.setScalar(0.95);
+      // 캐릭터 방향 보정 — Soldier.glb 의 bind pose 가 약간 좌측으로 틀어져 있어서
+      // model.rotation.y 로 강제 회전. -π/2 는 너무 큼 (옆 방향), 작은 값으로 미세 조정.
+      // 캐릭터 시선/몸 정면 보정.
+      // 수학적으론 0 이지만, aim idle / walk / run 클립 모두 상체에 좌측 트위스트가 baked in 돼서
+      // 시각적으론 왼쪽 보는 것처럼 보임. 점프 자세 (-0.45) 와 일치시켜 모든 상태에서 같은 방향 유지.
+      model.rotation.y = -0.45;
+      playerGroup.add(model);
+      soldier.model = model;
+      // 진단 — 캐릭터의 forward 방향을 world 좌표계로 측정
+      setTimeout(() => {
+        const fwd = new THREE.Vector3();
+        model.getWorldDirection(fwd);
+        console.log(`[Soldier] model world forward: (${fwd.x.toFixed(3)}, ${fwd.y.toFixed(3)}, ${fwd.z.toFixed(3)})`);
+        console.log(`[Soldier] expected: (0, 0, -1) for facing forward. +X = screen right, +Z = toward camera`);
+      }, 100);
+
+      // 본 이름 set (retarget 검증용) + Hips bind pose quaternion 캡쳐 (rebase 용)
+      const boneNames = new Set();
+      let hipsBindQuat = null;
+      model.traverse(o => {
+        if (o.name) boneNames.add(o.name);
+        if (!hipsBindQuat && /Hips$/i.test(o.name || '') && o.quaternion) {
+          hipsBindQuat = o.quaternion.clone();
+        }
+      });
+      console.log('[Soldier] Hips bind quat:', hipsBindQuat
+        ? `${hipsBindQuat.x.toFixed(3)},${hipsBindQuat.y.toFixed(3)},${hipsBindQuat.z.toFixed(3)},${hipsBindQuat.w.toFixed(3)}`
+        : 'NOT FOUND');
+
+      soldier.mixer = new THREE.AnimationMixer(model);
+
+      // 2) 16개 anim GLB 병렬 로드
+      const animResults = await Promise.allSettled(
+        Object.entries(animFiles).map(async ([key, file]) => {
+          const gltf = await loadGLB('figma-assets/models/anims/' + file);
+          return { key, clips: gltf.animations };
+        })
+      );
+
+      // 3) 각 클립 retarget + Hips/Head track 처리 + mixer 에 등록
+      let totalRenamed = 0, totalStripped = 0, totalRebased = 0, totalHeadStripped = 0;
+      for (const r of animResults) {
+        if (r.status !== 'fulfilled') {
+          console.warn('[Soldier] anim 로드 실패:', r.reason);
+          continue;
+        }
+        const { key, clips } = r.value;
+        if (!clips.length) continue;
+        const clip = clips[0];
+        totalRenamed += _retargetClip(clip, boneNames);
+        totalStripped += _stripHipsPosition(clip);
+        // jump 클립은 상체 회전 baked in → Hips + Spine 만 strip (어깨/팔은 자연스러운 자세 유지).
+        if (key === 'jump') {
+          clip.tracks = clip.tracks.filter(t =>
+            !/(Hips|Spine|Spine1|Spine2)\.quaternion$/i.test(t.name));
+        } else if (hipsBindQuat) {
+          totalRebased += _rebaseHipsQuaternion(clip, hipsBindQuat);
+        }
+        totalHeadStripped += _stripHeadTracks(clip);
+        const action = soldier.mixer.clipAction(clip);
+        soldier.extras[key] = action;
+      }
+      console.log(`[Soldier] anim clips registered: ${Object.keys(soldier.extras).length}/${Object.keys(animFiles).length} (renames: ${totalRenamed}, hips pos strips: ${totalStripped}, hips quat rebases: ${totalRebased}, head strips: ${totalHeadStripped})`);
+
+      // 4) idle/walk/run/jump 매핑.
+      soldier.actions.idle = soldier.extras.aim || null;
+      soldier.actions.walk = soldier.extras.walk || soldier.actions.idle;
+      soldier.actions.run  = soldier.extras.run  || soldier.actions.walk;
+      soldier.actions.jump = soldier.extras.jump || null;
+      // 점프는 once-play + 마지막 프레임 holding → 공중에서 마지막 자세 유지.
+      if (soldier.actions.jump) {
+        soldier.actions.jump.setLoop(THREE.LoopOnce);
+        soldier.actions.jump.clampWhenFinished = true;
+      }
+      console.log('[Soldier] actions: idle=' + !!soldier.actions.idle + ' walk=' + !!soldier.actions.walk + ' run=' + !!soldier.actions.run + ' jump=' + !!soldier.actions.jump);
+
+      for (const a of [soldier.actions.idle, soldier.actions.walk, soldier.actions.run]) {
+        if (!a) continue;
+        a.enabled = true;
+        a.setEffectiveTimeScale(1);
+        a.setEffectiveWeight(0);
+        a.play();
+      }
+      if (soldier.actions.idle) {
+        soldier.actions.idle.setEffectiveWeight(1);
+        soldier.current = soldier.actions.idle;
+      }
+
+      // 5) procedural 박스 body 숨김
+      for (const child of torso.children.slice()) {
+        if (child === rifle || child === muzzleFlashAnchor) continue;
+        child.visible = false;
+      }
+      headGroup.visible = false;
+      armL.root.visible = false;
+      armR.root.visible = false;
+      legL.root.visible = false;
+      legR.root.visible = false;
+
+      // 6) rifle reparent — torso(고정) → 오른손 본(애니메이션 따라 움직임)
+      //    + 박스 rifle parts 숨김 + Quaternius gun mesh 부착
+      let rightHand = null;
+      model.traverse(o => {
+        if (!rightHand && /right.?hand$/i.test(o.name || '')) rightHand = o;
+      });
+      console.log('[Soldier] right hand bone:', rightHand ? rightHand.name : 'NOT FOUND');
+      // 박스 rifle parts 숨김 (rifle group + muzzleFlashAnchor 자체는 유지)
+      for (const child of rifle.children.slice()) {
+        if (child === muzzleFlashAnchor) continue;
+        child.visible = false;
+      }
+      if (rightHand) {
+        rightHand.add(rifle);          // reparent → 손 본 기준 local 좌표
+        // Quaternius AssaultRifle_1 의 grip 이 hand 에 오도록 초기값.
+        // (사용자 조정 필요 — 모델마다 origin/축이 다름)
+        rifle.position.set(0, 0, 0);
+        rifle.rotation.set(0, 0, 0);
+        rifle.scale.setScalar(1);
+        // Quaternius gun mesh 로드 + rifle group 자식으로 추가
+        loadGLB('figma-assets/models/guns/AssaultRifle_1.glb').then(gltf => {
+          const gun = gltf.scene;
+          let meshCount = 0;
+          gun.traverse(o => {
+            if (o.isMesh) {
+              meshCount++;
+              o.castShadow = true;
+              o.receiveShadow = false;
+              o.frustumCulled = false;   // skinned mesh attachment 의 culling 이슈 회피
+              console.log(`[Soldier]   gun mesh: ${o.name} mat=${o.material?.type} verts=${o.geometry?.attributes?.position?.count || 0}`);
+            }
+          });
+          const gunBox = new THREE.Box3().setFromObject(gun);
+          const gunSize = gunBox.getSize(new THREE.Vector3());
+          console.log(`[Soldier] gun mesh count: ${meshCount}, size: ${gunSize.x.toFixed(3)} × ${gunSize.y.toFixed(3)} × ${gunSize.z.toFixed(3)}, pivot offset: ${gunBox.min.x.toFixed(3)}, ${gunBox.min.y.toFixed(3)}, ${gunBox.min.z.toFixed(3)}`);
+          const maxDim = Math.max(gunSize.x, gunSize.y, gunSize.z) || 1;
+          const targetLen = 0.5;
+          const autoScale = targetLen / maxDim;
+          gun.scale.setScalar(autoScale);
+          // 손 본 local 좌표계 — Mixamo right hand 는 +X 가 손가락 방향. 총 길이 (+X) 가 손가락 방향
+          // 으로 향하게 + 손 origin (손목) 에서 손가락 방향으로 0.1m 정도 offset (grip 이 손바닥에 오게).
+          // DEBUG: 총을 빨갛게 + 항상 위에 그려서 어디 있는지 확실히 보이게.
+          //        위치 결정되면 이 부분 제거.
+          gun.traverse(o => {
+            if (o.isMesh && o.material) {
+              o.material = o.material.clone();
+              o.material.color = new THREE.Color(0xff0000);
+              o.material.emissive = new THREE.Color(0x880000);
+              o.material.depthTest = false;
+              o.renderOrder = 999;
+            }
+          });
+          gun.position.set(0.15, 0, 0);
+          gun.rotation.set(0, 0, 0);
+          rifle.add(gun);
+          // 부착 후 world position 진단
+          const handPos = new THREE.Vector3();
+          rightHand.getWorldPosition(handPos);
+          const gunWorld = new THREE.Vector3();
+          gun.getWorldPosition(gunWorld);
+          console.log(`[Soldier] hand world: ${handPos.x.toFixed(2)}, ${handPos.y.toFixed(2)}, ${handPos.z.toFixed(2)}`);
+          console.log(`[Soldier] gun  world: ${gunWorld.x.toFixed(2)}, ${gunWorld.y.toFixed(2)}, ${gunWorld.z.toFixed(2)}`);
+          console.log(`[Soldier] gun attached — final scale: ${autoScale.toFixed(4)}, position/rotation = identity`);
+        }).catch(err => {
+          console.warn('[Soldier] AssaultRifle_1.glb 로드 실패 — 박스 rifle 복원', err);
+          for (const child of rifle.children.slice()) child.visible = true;
+        });
+      } else {
+        console.warn('[Soldier] 오른손 본 못 찾음 — rifle reparent 스킵, 박스 rifle 유지');
+        for (const child of rifle.children.slice()) child.visible = true;
+      }
+
+      soldier.loaded = true;
+    } catch (err) {
+      console.warn('Soldier 로드 체인 실패 — procedural 박스 캐릭터 유지', err);
+    }
+  })();
+})();
+
+// 매 프레임 호출: 현재 속도/지면 상태 기준으로 idle ↔ walk ↔ run ↔ jump crossfade.
+const _soldierFadeDuration = 0.18;
+let _soldierWasOnGround = true;
+function _updateSoldierAnimation(hspeed, dt) {
+  if (!soldier.loaded || !soldier.mixer) return;
+  soldier.mixer.update(dt);
+  const acts = soldier.actions;
+  if (!acts.idle && !acts.walk && !acts.run) return;
+
+  // 지면→공중 전환 감지 → 점프 액션 즉시 trigger (reset 후 재생).
+  // model.rotation 은 셋업 시 -0.45 로 고정 (모든 상태 동일 방향).
+  const justJumped = _soldierWasOnGround && !player.onGround;
+  _soldierWasOnGround = player.onGround;
+  if (justJumped && acts.jump) {
+    acts.jump.reset();
+    acts.jump.enabled = true;
+    acts.jump.setEffectiveTimeScale(1);
+    acts.jump.setEffectiveWeight(1);
+    if (soldier.current) acts.jump.crossFadeFrom(soldier.current, 0.08, true);
+    acts.jump.play();
+    soldier.current = acts.jump;
+    console.log('[Soldier] anim switch → jump (takeoff)');
+    return;
+  }
+
+  // 공중에서는 jump 유지 (clamp at end). 착지 시 아래 로직으로 다시 idle/walk/run.
+  let target;
+  if (!player.onGround && acts.jump) {
+    target = acts.jump;
+  } else if (hspeed < 0.3) target = acts.idle || acts.walk;
+  else if (hspeed < 6.5)   target = acts.walk || acts.idle;
+  else                     target = acts.run  || acts.walk;
+  if (!target || target === soldier.current) return;
+  const tgtName = target === acts.idle ? 'idle' : target === acts.walk ? 'walk' : target === acts.run ? 'run' : 'other';
+  const curName = !soldier.current ? 'null' : (soldier.current === acts.idle ? 'idle' : soldier.current === acts.walk ? 'walk' : soldier.current === acts.run ? 'run' : 'other');
+  console.log(`[Soldier] anim switch ${curName} → ${tgtName} at hspeed=${hspeed.toFixed(2)}`);
+  // 전환 시점에만 timescale 적용 (매 프레임 변경 시 jitter 발생) — 다리 cycle 을 실제 이동 속도에 맞춤
+  if (target === acts.walk) {
+    target.setEffectiveTimeScale(Math.min(3.5, Math.max(0.7, hspeed / 1.5)));
+  } else if (target === acts.run) {
+    // 달리기 reference 를 더 작게 + 상한도 더 크게 → 다리 cycle 빠르게 (skating 완화).
+    target.setEffectiveTimeScale(Math.min(4.0, Math.max(0.9, hspeed / 2.5)));
+  } else {
+    target.setEffectiveTimeScale(1);
+  }
+  // 상체 전방 lean 보정 — 달리기 자연스러움 ↑. idle/walk/점프 시 0.
+  if (soldier.model) {
+    soldier.model.rotation.x = (target === acts.run) ? -0.22 : 0;
+  }
+  if (soldier.current) target.crossFadeFrom(soldier.current, _soldierFadeDuration, true);
+  else                 target.setEffectiveWeight(1);
+  target.enabled = true;
+  target.setEffectiveWeight(1);
+  target.play();
+  soldier.current = target;
+}
 
 const player = {
   pos: new THREE.Vector3(0, 0, 0),
@@ -8976,6 +9409,8 @@ function updatePlayer(dt) {
   // Walk animation
   const hvx = player.vel.x, hvz = player.vel.z;
   const hspeed = Math.sqrt(hvx*hvx + hvz*hvz);
+  // GLTF Soldier 애니메이션 mixer 갱신 — procedural 박스가 visible=false 라도 빠른 폴백 안전.
+  _updateSoldierAnimation(hspeed, dt);
   const moving = hspeed > 0.2 && player.onGround;
   const freq = 2.2 + hspeed * 0.35;
   anim.phase += dt * (moving ? freq : 0);
