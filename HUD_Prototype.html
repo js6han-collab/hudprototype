@@ -3993,19 +3993,26 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xc4d2dc);
 scene.fog = new THREE.Fog(0xc8d4dc, 80, 240);   // 약간 푸른 안개
 
-// Hemisphere sky — world Y 기준 zenith→horizon 그라데이션. 메시 1개(sphere) + 간단한 shader.
+// Hemisphere sky — gradient + 절차적 fbm cloud noise. 메시 1개(sphere) + shader.
+// 비용: fragment shader 안 fbm 8 옥타브 + 시간 uniform 갱신만 (텍스처 없음).
+const _skyUniforms = {
+  topColor:    { value: new THREE.Color(0x4a8bc8) },   // 천정 — 푸른 하늘
+  bottomColor: { value: new THREE.Color(0xd8d0c8) },   // 지평 — 살짝 따뜻한 옅은 톤
+  offset:      { value: 12 },
+  exponent:    { value: 0.55 },
+  cloudColor:  { value: new THREE.Color(0xfdf8f0) },   // 구름 — 따뜻한 흰
+  cloudShadow: { value: new THREE.Color(0xc0c8d8) },   // 구름 아래쪽 그림자
+  cloudDensity:{ value: 0.55 },                          // 0.0 = 맑음, 1.0 = 흐림
+  cloudSpeed:  { value: 0.01 },                          // 흐르는 속도
+  uTime:       { value: 0 },
+};
 (function addSkyDome() {
-  const skyGeo = new THREE.SphereGeometry(320, 16, 8);
+  const skyGeo = new THREE.SphereGeometry(320, 32, 16);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
-    uniforms: {
-      topColor:    { value: new THREE.Color(0x4a8bc8) },   // 천정 — 푸른 하늘
-      bottomColor: { value: new THREE.Color(0xd8d0c8) },   // 지평 — 살짝 따뜻한 옅은 톤 (오후 햇빛)
-      offset:      { value: 12 },
-      exponent:    { value: 0.55 },
-    },
+    uniforms: _skyUniforms,
     vertexShader: `
       varying vec3 vWorldPosition;
       void main() {
@@ -4017,13 +4024,71 @@ scene.fog = new THREE.Fog(0xc8d4dc, 80, 240);   // 약간 푸른 안개
     fragmentShader: `
       uniform vec3 topColor;
       uniform vec3 bottomColor;
+      uniform vec3 cloudColor;
+      uniform vec3 cloudShadow;
       uniform float offset;
       uniform float exponent;
+      uniform float cloudDensity;
+      uniform float cloudSpeed;
+      uniform float uTime;
       varying vec3 vWorldPosition;
+
+      // hash & 2D value noise
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+      float noise2(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        float a = hash(i + vec2(0.0, 0.0));
+        float b = hash(i + vec2(1.0, 0.0));
+        float c = hash(i + vec2(0.0, 1.0));
+        float d = hash(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+      }
+      // fbm — 4 옥타브
+      float fbm(vec2 p) {
+        float v = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 5; i++) {
+          v += a * noise2(p);
+          p *= 2.03;
+          a *= 0.5;
+        }
+        return v;
+      }
+
       void main() {
+        vec3 dir = normalize(vWorldPosition);
+
+        // 기본 하늘 그라데이션
         float h = normalize(vWorldPosition + offset).y;
         float t = max(pow(max(h, 0.0), exponent), 0.0);
-        gl_FragColor = vec4(mix(bottomColor, topColor, t), 1.0);
+        vec3 sky = mix(bottomColor, topColor, t);
+
+        // 지평선 위에서만 구름 — 아래쪽은 점진 fade
+        float horizon = smoothstep(-0.02, 0.35, dir.y);
+
+        // dir.xz / dir.y 를 uv 로 → 구체 위쪽이 평면 처럼 펼쳐짐
+        vec2 cloudUV = dir.xz / max(dir.y, 0.12) * 0.45;
+        cloudUV += vec2(uTime * cloudSpeed, uTime * cloudSpeed * 0.3);
+
+        // 두 layer 의 fbm 합쳐 자연스러운 매스
+        float n1 = fbm(cloudUV * 1.0);
+        float n2 = fbm(cloudUV * 2.5 + 13.7);
+        float cloud = n1 * 0.65 + n2 * 0.35;
+
+        // density 컨트롤 — 임계값 기반으로 cloud / sky 영역 구분
+        float clouds = smoothstep(0.55 - cloudDensity * 0.25, 0.8, cloud);
+        clouds *= horizon;
+
+        // 구름 색상 — 위쪽은 밝게, 아래쪽 (지평선 쪽) 은 살짝 그림자
+        float verticalShade = smoothstep(0.0, 0.6, dir.y);
+        vec3 cloudCol = mix(cloudShadow, cloudColor, verticalShade);
+
+        vec3 finalColor = mix(sky, cloudCol, clouds);
+        gl_FragColor = vec4(finalColor, 1.0);
       }
     `,
   });
@@ -10240,6 +10305,7 @@ function frame(now) {
   animateGroundItems(t, dt);
   animateContainerGlow(t);
   animateClouds(dt);
+  _skyUniforms.uTime.value = t * 0.001;   // sky shader cloud drift
   renderQuickLoot();
   refreshInteractPrompt();
   tickInteraction(dt);
