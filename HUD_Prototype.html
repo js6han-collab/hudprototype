@@ -9599,7 +9599,9 @@ function updatePlayer(dt) {
         player.pos.z - fz * backDist + rz * rightOff
       )
     : new THREE.Vector3(player.pos.x, player.pos.y + (player.crouched ? player.eyeHeightCrouched : player.eyeHeight), player.pos.z);
-  camera.position.lerp(targetPos, 0.35);
+  // 이전: camera.position.lerp(targetPos, 0.35) → 마우스 회전 시 카메라가 target 을 따라잡지 못해
+  // swing/jitter 발생. TPS 는 카메라 위치가 캐릭터 + yaw 에 묶여있어 snap 이 맞음.
+  camera.position.copy(targetPos);
   // 1인칭 카메라 bob / breathing — 3인칭에선 캐릭터 메시 자체가 bob 되므로 카메라엔 적용 X.
   if (!state.thirdPerson) {
     const hvx2 = player.vel.x, hvz2 = player.vel.z;
