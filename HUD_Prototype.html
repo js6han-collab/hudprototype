@@ -4974,55 +4974,32 @@ const soldier = {
       }
       if (rightHand) {
         rightHand.add(rifle);          // reparent → 손 본 기준 local 좌표
-        // Quaternius AssaultRifle_1 의 grip 이 hand 에 오도록 초기값.
-        // (사용자 조정 필요 — 모델마다 origin/축이 다름)
         rifle.position.set(0, 0, 0);
         rifle.rotation.set(0, 0, 0);
         rifle.scale.setScalar(1);
-        // Quaternius gun mesh 로드 + rifle group 자식으로 추가
+        // Quaternius AssaultRifle_1.glb 부착. 모델 그대로의 머티리얼 사용 (다크 metal).
         loadGLB('figma-assets/models/guns/AssaultRifle_1.glb').then(gltf => {
           const gun = gltf.scene;
-          let meshCount = 0;
           gun.traverse(o => {
             if (o.isMesh) {
-              meshCount++;
               o.castShadow = true;
               o.receiveShadow = false;
-              o.frustumCulled = false;   // skinned mesh attachment 의 culling 이슈 회피
-              console.log(`[Soldier]   gun mesh: ${o.name} mat=${o.material?.type} verts=${o.geometry?.attributes?.position?.count || 0}`);
+              o.frustumCulled = false;   // skinned 부착 culling 회피
             }
           });
+          // 크기 정규화 — 총 길이 ~0.55m 목표
           const gunBox = new THREE.Box3().setFromObject(gun);
           const gunSize = gunBox.getSize(new THREE.Vector3());
-          console.log(`[Soldier] gun mesh count: ${meshCount}, size: ${gunSize.x.toFixed(3)} × ${gunSize.y.toFixed(3)} × ${gunSize.z.toFixed(3)}, pivot offset: ${gunBox.min.x.toFixed(3)}, ${gunBox.min.y.toFixed(3)}, ${gunBox.min.z.toFixed(3)}`);
           const maxDim = Math.max(gunSize.x, gunSize.y, gunSize.z) || 1;
-          const targetLen = 0.5;
-          const autoScale = targetLen / maxDim;
-          gun.scale.setScalar(autoScale);
-          // 손 본 local 좌표계 — Mixamo right hand 는 +X 가 손가락 방향. 총 길이 (+X) 가 손가락 방향
-          // 으로 향하게 + 손 origin (손목) 에서 손가락 방향으로 0.1m 정도 offset (grip 이 손바닥에 오게).
-          // DEBUG: 총을 빨갛게 + 항상 위에 그려서 어디 있는지 확실히 보이게.
-          //        위치 결정되면 이 부분 제거.
-          gun.traverse(o => {
-            if (o.isMesh && o.material) {
-              o.material = o.material.clone();
-              o.material.color = new THREE.Color(0xff0000);
-              o.material.emissive = new THREE.Color(0x880000);
-              o.material.depthTest = false;
-              o.renderOrder = 999;
-            }
-          });
-          gun.position.set(0.15, 0, 0);
-          gun.rotation.set(0, 0, 0);
+          gun.scale.setScalar(0.55 / maxDim);
+          // Mixamo right hand local: +X = 손가락 방향, +Y = 손등 방향, +Z = 엄지 방향.
+          // Quaternius AssaultRifle_1 의 barrel 은 +Z 방향이므로 Y축 -90° 로 손가락 방향에 정렬.
+          // 추가 미세 회전: grip 이 손목 안쪽으로 살짝 기울게 (Z축 회전).
+          gun.rotation.set(0, -Math.PI / 2, 0);
+          // 손바닥 중앙으로 grip offset — 손목(본 origin)에서 손가락 쪽 0.08m, 손바닥 아래 0.02m
+          gun.position.set(0.08, -0.02, 0);
           rifle.add(gun);
-          // 부착 후 world position 진단
-          const handPos = new THREE.Vector3();
-          rightHand.getWorldPosition(handPos);
-          const gunWorld = new THREE.Vector3();
-          gun.getWorldPosition(gunWorld);
-          console.log(`[Soldier] hand world: ${handPos.x.toFixed(2)}, ${handPos.y.toFixed(2)}, ${handPos.z.toFixed(2)}`);
-          console.log(`[Soldier] gun  world: ${gunWorld.x.toFixed(2)}, ${gunWorld.y.toFixed(2)}, ${gunWorld.z.toFixed(2)}`);
-          console.log(`[Soldier] gun attached — final scale: ${autoScale.toFixed(4)}, position/rotation = identity`);
+          console.log('[Soldier] gun attached:', gun.scale.x.toFixed(3));
         }).catch(err => {
           console.warn('[Soldier] AssaultRifle_1.glb 로드 실패 — 박스 rifle 복원', err);
           for (const child of rifle.children.slice()) child.visible = true;
