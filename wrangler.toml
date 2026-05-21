@@ -1,0 +1,8 @@
+name = "hudprototype"
+compatibility_date = "2025-01-01"
+
+# 순수 정적 사이트 — Vite 가 dist/ 에 빌드한 결과물을 Worker assets 로 서빙.
+# Vite preset 으로 npm run build 실행 후 wrangler 가 dist/ 를 업로드.
+[assets]
+directory = "./dist"
+not_found_handling = "404-page"
