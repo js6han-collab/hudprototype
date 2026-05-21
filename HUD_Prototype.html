@@ -4333,6 +4333,7 @@ addCover(-30, 30, 1.6, 1.4, 3.0);
   const mesh = new THREE.InstancedMesh(grassGeo, grassMat, COUNT);
   mesh.castShadow = false;
   mesh.receiveShadow = false;
+  mesh.frustumCulled = false;   // instance 위치 culling 잘못 계산해서 pop 발생 → 항상 렌더
   const dummy = new THREE.Object3D();
   let placed = 0, tries = 0;
   while (placed < COUNT && tries < COUNT * 3) {
@@ -4368,6 +4369,7 @@ addCover(-30, 30, 1.6, 1.4, 3.0);
   const mesh = new THREE.InstancedMesh(bushGeo, bushMat, COUNT);
   mesh.castShadow = true;
   mesh.receiveShadow = false;
+  mesh.frustumCulled = false;
   const dummy = new THREE.Object3D();
   let placed = 0, tries = 0;
   while (placed < COUNT && tries < COUNT * 5) {
@@ -4718,7 +4720,12 @@ const soldier = {
       const soldierGltf = await loadGLB('figma-assets/models/Soldier.glb');
       const model = soldierGltf.scene;
       model.traverse(o => {
-        if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; }
+        if (o.isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = false;
+          // SkinnedMesh 의 bounding 이 bone 변형 반영 못 해서 시점 회전 시 pop. 항상 렌더.
+          o.frustumCulled = false;
+        }
       });
       model.scale.setScalar(0.95);
       // 캐릭터 방향 보정 — Soldier.glb 의 bind pose 가 약간 좌측으로 틀어져 있어서
