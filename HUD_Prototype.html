@@ -4062,32 +4062,42 @@ const _skyUniforms = {
       void main() {
         vec3 dir = normalize(vWorldPosition);
 
-        // 기본 하늘 그라데이션
+        // 1) 기본 하늘 그라데이션
         float h = normalize(vWorldPosition + offset).y;
         float t = max(pow(max(h, 0.0), exponent), 0.0);
         vec3 sky = mix(bottomColor, topColor, t);
 
-        // 지평선 위에서만 구름 — 아래쪽은 점진 fade
-        float horizon = smoothstep(-0.02, 0.35, dir.y);
+        // 2) 산 실루엣 2 layer — 멀리 안개 톤 (atmospheric perspective)
+        // 수평 방위각 기반 1D-스러운 noise → 지평선 따라 ridge 라인
+        float ang = atan(dir.x, dir.z);
+        // near layer (어둡고, 더 높음)
+        float ridge1 = fbm(vec2(ang * 2.8, 0.0)) * 0.085 + 0.03;
+        float maskMtnNear = smoothstep(ridge1, ridge1 - 0.012, dir.y);
+        // far layer (밝고, 낮음) — 더 멀어 보이는 안개색
+        float ridge2 = fbm(vec2(ang * 4.5 + 11.3, 0.0)) * 0.055 + 0.045;
+        float maskMtnFar = smoothstep(ridge2, ridge2 - 0.008, dir.y);
+        // far 가 near 뒤로 — near 이 있는 곳은 far 보이지 않음
+        maskMtnFar = max(0.0, maskMtnFar - maskMtnNear);
+        // 색상 — 헤이즈 영향
+        vec3 mtnNearCol = mix(bottomColor * 0.45, vec3(0.32, 0.34, 0.42), 0.6);
+        vec3 mtnFarCol  = mix(bottomColor * 0.85, vec3(0.55, 0.58, 0.66), 0.45);
+        vec3 finalColor = sky;
+        finalColor = mix(finalColor, mtnFarCol, maskMtnFar);
+        finalColor = mix(finalColor, mtnNearCol, maskMtnNear);
 
-        // dir.xz / dir.y 를 uv 로 → 구체 위쪽이 평면 처럼 펼쳐짐
+        // 3) 구름 — 산 위쪽 영역에 그려져서 산이 가려지지 않게
+        float horizon = smoothstep(0.04, 0.35, dir.y);
         vec2 cloudUV = dir.xz / max(dir.y, 0.12) * 0.45;
         cloudUV += vec2(uTime * cloudSpeed, uTime * cloudSpeed * 0.3);
-
-        // 두 layer 의 fbm 합쳐 자연스러운 매스
         float n1 = fbm(cloudUV * 1.0);
         float n2 = fbm(cloudUV * 2.5 + 13.7);
         float cloud = n1 * 0.65 + n2 * 0.35;
-
-        // density 컨트롤 — 임계값 기반으로 cloud / sky 영역 구분
         float clouds = smoothstep(0.55 - cloudDensity * 0.25, 0.8, cloud);
         clouds *= horizon;
-
-        // 구름 색상 — 위쪽은 밝게, 아래쪽 (지평선 쪽) 은 살짝 그림자
         float verticalShade = smoothstep(0.0, 0.6, dir.y);
         vec3 cloudCol = mix(cloudShadow, cloudColor, verticalShade);
+        finalColor = mix(finalColor, cloudCol, clouds);
 
-        vec3 finalColor = mix(sky, cloudCol, clouds);
         gl_FragColor = vec4(finalColor, 1.0);
       }
     `,
@@ -4276,6 +4286,33 @@ function animateClouds(dt) {
     if (c.group.position.x < -150) c.group.position.x =  150;
   }
 }
+
+// 멀리 도시 실루엣 — 다크 톤 박스 타워들. 안개에 fade 되어 헤이즈 효과 살아남.
+// MeshBasicMaterial (조명 영향 X) + fog 적용으로 거리감.
+(function addDistantSilhouette() {
+  const farMat = new THREE.MeshLambertMaterial({ color: 0x4a525e, fog: true });
+  // (radius, angle, w, h, d) — 다양한 높이 + 위치
+  const towers = [];
+  const ringR = 170;
+  // 24개 정도 박스를 둘레에 흩뿌림 (모든 방향 커버)
+  const slots = 28;
+  for (let i = 0; i < slots; i++) {
+    const ang = (i / slots) * Math.PI * 2 + Math.random() * 0.08;
+    const r = ringR + (Math.random() - 0.5) * 30;
+    const x = Math.cos(ang) * r;
+    const z = Math.sin(ang) * r;
+    const w = 6 + Math.random() * 16;
+    const d = 6 + Math.random() * 16;
+    const h = 8 + Math.random() * 28;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), farMat);
+    m.position.set(x, h/2, z);
+    m.rotation.y = Math.random() * Math.PI * 2;
+    m.castShadow = false;   // 거리 멀어 그림자 의미 없음
+    m.receiveShadow = false;
+    scene.add(m);
+    towers.push(m);
+  }
+})();
 
 // Cover pieces — 각 박스마다 머티리얼 살짝 변주 (색상 / roughness) → 똑같이 안 보이게.
 const _coverPalette = [
