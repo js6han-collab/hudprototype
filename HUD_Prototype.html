@@ -4188,8 +4188,9 @@ ground.rotation.x = -Math.PI/2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// 콘크리트 도로/광장 — 어두운 회색 patch, 캐릭터 활동 영역 깔개.
-const _concreteMat = new THREE.MeshStandardMaterial({ color: 0x4a4540, roughness: 0.88, metalness: 0.0 });
+// 콘크리트 도로 — 어두운 회색 strip. 중앙 광장은 사각형이 부자연스러워서 제거.
+// 도로만 십자형으로 깔아 동선 유도. 톤 어둡게 + 거의 무광 → 광원에 안 튐.
+const _concreteMat = new THREE.MeshStandardMaterial({ color: 0x2e2a25, roughness: 0.98, metalness: 0.0 });
 function addConcrete(x, z, w, d, rotY = 0) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), _concreteMat);
   m.rotation.x = -Math.PI/2;
@@ -4198,11 +4199,11 @@ function addConcrete(x, z, w, d, rotY = 0) {
   m.receiveShadow = true;
   scene.add(m);
 }
-addConcrete(0, 0, 18, 16);                      // 중앙 광장
-addConcrete(0, -28, 8, 30);                     // 남쪽 도로
-addConcrete(0, 28, 8, 30);                      // 북쪽 도로
-addConcrete(28, 0, 30, 8, Math.PI/2);           // 동쪽 도로 (90° 회전)
-addConcrete(-28, 0, 30, 8, Math.PI/2);          // 서쪽 도로
+// 십자 도로 4방향만 (중앙 정사각 광장 제거).
+addConcrete(0, -28, 7, 50);                     // 남쪽 도로 (긴 strip)
+addConcrete(0, 28, 7, 50);                      // 북쪽 도로
+addConcrete(28, 0, 50, 7, Math.PI/2);           // 동쪽 도로
+addConcrete(-28, 0, 50, 7, Math.PI/2);          // 서쪽 도로
 
 const grid = new THREE.GridHelper(200, 80, 0x6b6344, 0x3a361f);
 grid.position.y = 0.005;
@@ -4339,11 +4340,10 @@ addCover(-30, 30, 1.6, 1.4, 3.0);
     const x = (Math.random() - 0.5) * 140;
     const z = (Math.random() - 0.5) * 140;
     const r2 = x*x + z*z;
-    // 콘크리트 (중앙 광장 ±9 / 도로 strips) 영역 회피
-    const onSquare = Math.abs(x) < 10 && Math.abs(z) < 9;
-    const onRoadNS = Math.abs(x) < 5 && Math.abs(z) < 44;
-    const onRoadEW = Math.abs(z) < 5 && Math.abs(x) < 44;
-    if (onSquare || onRoadNS || onRoadEW) continue;
+    // 도로 strip 회피 (남북 7폭 / 동서 7폭, 각 길이 ~50m)
+    const onRoadNS = Math.abs(x) < 4.5 && Math.abs(z) < 54;
+    const onRoadEW = Math.abs(z) < 4.5 && Math.abs(x) < 54;
+    if (onRoadNS || onRoadEW) continue;
     if (r2 < 8) continue;   // 캐릭터 시작 위치 근처 회피
     dummy.position.set(x, 0, z);
     dummy.rotation.y = Math.random() * Math.PI * 2;
@@ -4376,10 +4376,9 @@ addCover(-30, 30, 1.6, 1.4, 3.0);
     const z = (Math.random() - 0.5) * 130;
     const r2 = x*x + z*z;
     if (r2 < 36) continue;   // 중앙 활동 영역 회피 (반경 6m)
-    const onSquare = Math.abs(x) < 11 && Math.abs(z) < 10;
-    const onRoadNS = Math.abs(x) < 6 && Math.abs(z) < 45;
-    const onRoadEW = Math.abs(z) < 6 && Math.abs(x) < 45;
-    if (onSquare || onRoadNS || onRoadEW) continue;
+    const onRoadNS = Math.abs(x) < 5.5 && Math.abs(z) < 55;
+    const onRoadEW = Math.abs(z) < 5.5 && Math.abs(x) < 55;
+    if (onRoadNS || onRoadEW) continue;
     dummy.position.set(x, 0.35 + Math.random() * 0.2, z);
     dummy.rotation.y = Math.random() * Math.PI * 2;
     const s = 0.8 + Math.random() * 1.6;
