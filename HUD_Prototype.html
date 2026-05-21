@@ -8955,6 +8955,12 @@ function closeFullInventory() {
   fiMod.padXHoldStart = 0;
   fiMod.padXHoldFired = false;
   fiUpdateModHint();
+  // 닫자마자 포인터 락 재요청 — 사용자가 다시 클릭 안 해도 바로 시선 조작 가능.
+  // Escape/Tab 키 이벤트는 user activation 이라 즉시 호출 가능. 만약 브라우저 cooldown 으로
+  // 실패하면 캔버스 클릭으로 잡히는 기존 fallback 이 살아 있음.
+  if (!document.pointerLockElement) {
+    renderer.domElement.requestPointerLock?.();
+  }
 }
 
 // =====================================================
