@@ -4155,66 +4155,47 @@ scene.add(fill);
 // Ground — 흙 + 콘크리트 mix 절차적 텍스처. 회색 콘크리트 패치 + 갈색 흙 패치 + 미세 노이즈.
 const groundTex = (function buildGroundTexture() {
   const c = document.createElement('canvas');
-  c.width = c.height = 1024;   // 더 큰 해상도 → 디테일 풍부
+  c.width = c.height = 1024;
   const ctx = c.getContext('2d');
 
-  // 1) 베이스 — 어두운 회색-갈색 (콘크리트 톤)
-  ctx.fillStyle = '#3a3530';
+  // 1) 베이스 — 균일한 콘크리트 중간 회색
+  ctx.fillStyle = '#6a6a68';
   ctx.fillRect(0, 0, 1024, 1024);
 
-  // 2) 큰 콘크리트 패치 (회색, 불규칙)
-  for (let i = 0; i < 40; i++) {
+  // 2) 큰 명도 변주 패치 (회색 범위 내, 갈색 없음). 살짝 어둡거나 살짝 밝게만.
+  for (let i = 0; i < 50; i++) {
     const x = Math.random()*1024, y = Math.random()*1024;
-    const r = 60 + Math.random()*140;
-    const v = 50 + Math.random()*25;
-    ctx.fillStyle = `rgba(${v},${v*0.97},${v*0.93},0.55)`;
+    const r = 80 + Math.random()*160;
+    const v = 95 + Math.random()*30;       // 95~125 — 베이스(106) 근처에서만 ±15 변주
+    const a = 0.18 + Math.random()*0.18;   // 옅게
+    ctx.fillStyle = `rgba(${v},${v},${v*0.98},${a})`;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
   }
 
-  // 3) 갈색 흙 패치 (warm brown, irregular)
-  for (let i = 0; i < 60; i++) {
+  // 3) 미세 자갈/모래 speckle (밝/어둠 양쪽) — 콘크리트 grain
+  for (let i = 0; i < 14000; i++) {
     const x = Math.random()*1024, y = Math.random()*1024;
-    const r = 40 + Math.random()*110;
-    ctx.fillStyle = `rgba(${50+Math.random()*25},${38+Math.random()*18},${28+Math.random()*14},0.42)`;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
-  }
-
-  // 4) 어두운 얼룩 (오일/물자국)
-  for (let i = 0; i < 25; i++) {
-    const x = Math.random()*1024, y = Math.random()*1024;
-    const r = 15 + Math.random()*45;
-    ctx.fillStyle = `rgba(15,12,10,${0.3 + Math.random()*0.25})`;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
-  }
-
-  // 5) 미세 자갈/모래 speckle (밝은 점)
-  for (let i = 0; i < 12000; i++) {
-    const x = Math.random()*1024, y = Math.random()*1024;
-    const v = 70 + Math.random()*60;
-    const a = 0.18 + Math.random()*0.32;
-    ctx.fillStyle = `rgba(${v},${v*0.95},${v*0.85},${a})`;
-    const s = 0.8 + Math.random()*1.8;
+    const dark = Math.random() < 0.55;
+    if (dark) {
+      ctx.fillStyle = `rgba(${50+Math.random()*20},${50+Math.random()*20},${50+Math.random()*20},${0.18 + Math.random()*0.22})`;
+    } else {
+      ctx.fillStyle = `rgba(${135+Math.random()*30},${135+Math.random()*30},${130+Math.random()*30},${0.12 + Math.random()*0.18})`;
+    }
+    const s = 0.7 + Math.random()*1.4;
     ctx.fillRect(x, y, s, s);
   }
 
-  // 6) 어두운 미세 점 (먼지/구멍)
-  for (let i = 0; i < 5000; i++) {
-    const x = Math.random()*1024, y = Math.random()*1024;
-    ctx.fillStyle = `rgba(15,12,8,${0.2 + Math.random()*0.3})`;
-    ctx.fillRect(x, y, 0.8 + Math.random()*1.2, 0.8 + Math.random()*1.2);
-  }
-
-  // 7) 균열 (concrete cracks) — 얇은 어두운 선
-  ctx.strokeStyle = 'rgba(20,18,15,0.5)';
-  for (let i = 0; i < 18; i++) {
-    ctx.lineWidth = 0.5 + Math.random()*1.2;
+  // 4) 균열 — 옅고 짧게, 빈번하지 않게
+  ctx.strokeStyle = 'rgba(35,35,33,0.42)';
+  for (let i = 0; i < 14; i++) {
+    ctx.lineWidth = 0.4 + Math.random()*0.9;
     ctx.beginPath();
     let x = Math.random()*1024, y = Math.random()*1024;
     ctx.moveTo(x, y);
-    const segs = 3 + Math.floor(Math.random()*5);
+    const segs = 2 + Math.floor(Math.random()*4);
     for (let j = 0; j < segs; j++) {
-      x += (Math.random()-0.5) * 80;
-      y += (Math.random()-0.5) * 80;
+      x += (Math.random()-0.5) * 70;
+      y += (Math.random()-0.5) * 70;
       ctx.lineTo(x, y);
     }
     ctx.stroke();
@@ -4222,13 +4203,13 @@ const groundTex = (function buildGroundTexture() {
 
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(16, 16);   // 24 → 16, 타일 큼직하게 → 디테일 더 잘 보임
+  t.repeat.set(20, 20);   // 더 작은 타일 → 균일한 콘크리트 느낌
   t.anisotropy = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;
   t.encoding = THREE.sRGBEncoding;
   return t;
 })();
-// material color: 어두운 자갈색 — tex 와 multiply 되므로 텍스처 톤 그대로 살림.
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x8a8278, map: groundTex, roughness: 0.95, metalness: 0.0 });
+// material color: 회색 콘크리트 톤. roughness 1.0 으로 specular 완전 제거 (빤딱빤딱 X).
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x8e8e8c, map: groundTex, roughness: 1.0, metalness: 0.0 });
 // 평지 — 캐릭터 물리가 y=0 기준이라 지형 굴곡은 컬리전 충돌 (캐릭터 파고듦) → 평지 유지.
 // 변주는 텍스처 + grass/bushes 로만 표현.
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), groundMat);
